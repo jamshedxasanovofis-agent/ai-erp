@@ -6,7 +6,7 @@ import { Dialog } from "@/components/ui/Dialog"
 import { Input, Label, Select } from "@/components/ui/Input"
 import { FileUpload } from "@/components/ui/FileUpload"
 import { Avatar } from "@/components/ui/Avatar"
-import { Plus } from "lucide-react"
+import { Plus, Send, CheckCircle2 } from "lucide-react"
 
 type Profile = {
   id: string
@@ -17,12 +17,21 @@ type Profile = {
   phone: string | null
   avatar_url: string | null
   role: string | null
+  telegram_chat_id: string | null
 }
 
 const ROLE_LABEL: Record<string, string> = { full: "To‘liq huquq", crm: "Faqat CRM", pending: "Kutilmoqda" }
+const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined
 
 function OrgNode({ profile, all, depth, onRoleChange }: { profile: Profile; all: Profile[]; depth: number; onRoleChange: (id: string, role: string) => void }) {
   const children = all.filter((p) => p.manager_id === profile.id)
+  const [copied, setCopied] = useState(false)
+  function copyTelegramLink() {
+    if (!BOT_USERNAME) return
+    navigator.clipboard.writeText(`https://t.me/${BOT_USERNAME}?start=emp_${profile.id}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
   return (
     <div className={depth > 0 ? "ml-6 border-l border-[var(--color-border)] pl-6" : ""}>
       <div className="mb-3 flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-soft)]">
@@ -33,13 +42,28 @@ function OrgNode({ profile, all, depth, onRoleChange }: { profile: Profile; all:
             <div className="text-xs text-[var(--color-ink-soft)]">{profile.position || "—"} {profile.department ? `· ${profile.department}` : ""}</div>
           </div>
         </div>
-        <select
-          value={profile.role ?? "pending"}
-          onChange={(e) => onRoleChange(profile.id, e.target.value)}
-          className="h-8 shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs outline-none focus:border-[var(--color-accent)]"
-        >
-          {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+        <div className="flex shrink-0 items-center gap-2">
+          {profile.telegram_chat_id ? (
+            <span title="Telegramga ulangan" className="text-[var(--color-success)]"><CheckCircle2 size={16} /></span>
+          ) : (
+            BOT_USERNAME && (
+              <button
+                onClick={copyTelegramLink}
+                title="Telegram bot havolasini nusxalash"
+                className="cursor-pointer rounded p-1 text-[var(--color-ink-faint)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent)]"
+              >
+                {copied ? <CheckCircle2 size={16} className="text-[var(--color-success)]" /> : <Send size={16} />}
+              </button>
+            )
+          )}
+          <select
+            value={profile.role ?? "pending"}
+            onChange={(e) => onRoleChange(profile.id, e.target.value)}
+            className="h-8 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs outline-none focus:border-[var(--color-accent)]"
+          >
+            {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
       </div>
       {children.map((c) => <OrgNode key={c.id} profile={c} all={all} depth={depth + 1} onRoleChange={onRoleChange} />)}
     </div>
@@ -90,7 +114,7 @@ export default function Employees() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Xodimlar</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight">Xodimlar</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">ORG struktura, vazifa va vakolatlar</p>
         </div>
         <Button variant="accent" onClick={() => setOpen(true)}>

@@ -17,6 +17,12 @@ dist-ssr
 .env.*
 !.env.example
 
+# local auth/session state — contains live tokens, never commit
+n8n_auth_state.json
+
+# Supabase CLI local link cache
+supabase/.temp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

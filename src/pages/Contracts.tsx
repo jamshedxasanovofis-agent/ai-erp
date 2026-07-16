@@ -35,7 +35,10 @@ type Contract = {
   end_date: string | null
   file_url: string | null
   client_id: string | null
+  project_id: string | null
+  auto_generated: boolean
   clients?: { name: string } | null
+  projects?: { name: string } | null
 }
 
 const emptyForm = { number: "", client_id: "", amount: "", status: "yangi", start_date: "", end_date: "", file_url: "" }
@@ -49,7 +52,7 @@ export default function Contracts() {
 
   async function load() {
     const [{ data: c }, { data: cl }] = await Promise.all([
-      supabase.from("contracts").select("*, clients(name)").order("created_at", { ascending: false }),
+      supabase.from("contracts").select("*, clients(name), projects(name)").order("created_at", { ascending: false }),
       supabase.from("clients").select("id, name"),
     ])
     setContracts((c as any) ?? [])
@@ -103,7 +106,7 @@ export default function Contracts() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Shartnomalar</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight">Shartnomalar</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">Eski, yangi va kutilayotgan shartnomalar</p>
         </div>
         <Button variant="accent" onClick={openNew}>
@@ -111,7 +114,7 @@ export default function Contracts() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
         {contracts.map((c) => (
           <Card key={c.id} className="cursor-pointer" onClick={() => openEdit(c)}>
             <CardContent className="pt-5">
@@ -121,6 +124,7 @@ export default function Contracts() {
                   <h4 className="font-medium">{c.number || "Raqamsiz"}</h4>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  {c.auto_generated && <Badge tone="neutral">Avto</Badge>}
                   <Badge tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Badge>
                   <button
                     onClick={(e) => { e.stopPropagation(); remove(c) }}
@@ -131,6 +135,7 @@ export default function Contracts() {
                 </div>
               </div>
               <div className="text-sm text-[var(--color-ink-soft)]">{c.clients?.name ?? "Mijoz biriktirilmagan"}</div>
+              {c.projects?.name && <div className="text-xs text-[var(--color-ink-faint)]">Loyiha: {c.projects.name}</div>}
               {c.amount != null && <div className="mt-1 text-sm font-medium text-[var(--color-accent)]">{formatMoney(c.amount)}</div>}
               <div className="mt-2 text-xs text-[var(--color-ink-faint)]">
                 {c.start_date ? formatDate(c.start_date) : "—"} → {c.end_date ? formatDate(c.end_date) : "—"}

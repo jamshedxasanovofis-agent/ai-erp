@@ -76,7 +76,7 @@ export default function ImageGen() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Rasm generatsiya</h1>
+        <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight">Rasm generatsiya</h1>
         <p className="mt-1 text-sm text-[var(--color-ink-soft)]">Matn orqali sun’iy intellekt bilan rasm yarating — natija Supabase’da saqlanadi</p>
       </div>
 

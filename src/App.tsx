@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from "react-router-dom"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { AppLayout } from "@/components/layout/AppLayout"
 import Login from "@/pages/Login"
+import BookingPage from "@/pages/BookingPage"
+import PublicBookingPage from "@/pages/PublicBookingPage"
 import Dashboard from "@/pages/Dashboard"
 import Crm from "@/pages/Crm"
 import Projects from "@/pages/Projects"
@@ -77,8 +79,17 @@ function Gate() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Gate />
-    </AuthProvider>
+    <Routes>
+      <Route path="/booking/lead/:leadToken" element={<PublicBookingPage />} />
+      <Route path="/booking/:token" element={<BookingPage />} />
+      <Route
+        path="/*"
+        element={
+          <AuthProvider>
+            <Gate />
+          </AuthProvider>
+        }
+      />
+    </Routes>
   )
 }

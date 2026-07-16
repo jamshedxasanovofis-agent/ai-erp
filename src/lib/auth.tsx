@@ -33,6 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
     })
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
+      // Do NOT toggle `loading` here — Supabase fires this on every tab
+      // focus/visibility regain (token refresh), and setting loading=true
+      // would unmount the whole app (Gate() renders a Spinner while
+      // loading), wiping any in-progress form state. `loading` should only
+      // reflect the very first session check on app boot (see above).
       setSession(s)
       if (s) await loadRole(s.user.id)
       else setRole(null)

@@ -98,7 +98,7 @@ export default function DemoTracker() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">TZ / Demo</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight">TZ / Demo</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">Kimga demo berildi, kimdan TZ olindi</p>
         </div>
         <Button variant="accent" onClick={openNew}>
@@ -106,7 +106,7 @@ export default function DemoTracker() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((d) => (
           <Card key={d.id} className="cursor-pointer" onClick={() => openEdit(d)}>
             <CardContent className="pt-5">

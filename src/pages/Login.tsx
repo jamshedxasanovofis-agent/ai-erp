@@ -28,11 +28,11 @@ export default function Login() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-[var(--shadow-card)]"
+        className="w-full max-w-[380px] rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface)] p-9 shadow-[var(--shadow-card)]"
       >
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 h-10 w-10 rounded-2xl bg-[var(--color-ink)]" />
-          <h1 className="text-lg font-semibold">Dynamic ERP</h1>
+          <div className="mx-auto mb-3 h-10 w-10 rounded-[14px] bg-[var(--color-ink)]" />
+          <h1 className="font-[family-name:var(--font-display)] text-lg font-semibold">Dynamic ERP</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">Agentlik boshqaruv tizimiga kirish</p>
         </div>
         <form onSubmit={submit} className="space-y-4">
