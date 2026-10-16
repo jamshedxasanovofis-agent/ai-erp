@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "Uchrashuv yaratib bo'lmadi" }), { status: 500, headers: JSON_HEADERS })
   }
 
-  const when = new Date(scheduledAt).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+  const when = new Date(scheduledAt).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tashkent" })
   await sendGroupMessage(`🆕 Yangi uchrashuv band qilindi!\n<b>${clientName}</b>${contactLine ? ` — ${contactLine}` : ""}\nVaqt: ${when}`)
 
   return new Response(JSON.stringify({ ok: true, meeting_id: meeting.id, lead_id: leadId }), { headers: JSON_HEADERS })

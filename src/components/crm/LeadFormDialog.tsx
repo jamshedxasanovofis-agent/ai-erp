@@ -3,29 +3,35 @@ import { supabase } from "@/lib/supabase"
 import { Dialog } from "@/components/ui/Dialog"
 import { Button } from "@/components/ui/Button"
 import { Input, Label, Select } from "@/components/ui/Input"
+import { PhoneInput, AmountInput } from "@/components/ui/MaskedInputs"
+import { MultiAssigneeSelect } from "@/components/ui/MultiAssigneeSelect"
 import { Comments } from "@/components/ui/Comments"
 import { HistoryButton } from "@/components/ui/HistoryPanel"
 import { logFieldChanges } from "@/lib/history"
 import { TEMPERATURES, SOURCES, TIERS, REGIONS, BUSINESS_TYPES, BUSINESS_FIELD_MAP, LANGUAGES, FUNNELS } from "@/lib/crmConstants"
-import { formatDate } from "@/lib/utils"
+import { formatDateTime } from "@/lib/utils"
 import type { Lead, ProfileOption } from "@/lib/crmTypes"
 
 const FIELD_LABELS: Record<string, string> = {
   client_name: "Mijoz ismi", company: "Kompaniya", activity_name: "Faoliyat nomi", phone: "Telefon",
   amount: "Summa", project_type: "Loyiha turi", employees_count: "Xodimlar soni", budget: "Byudjet",
   temperature: "Harorat", source: "Manba", region: "Viloyat", business_type: "Biznes turi",
-  language: "Til", tier: "Tier", funnel: "Voronka", deadline: "Deadline", assigned_to: "Mas'ul xodim",
+  language: "Til", tier: "Tier", funnel: "Voronka", deadline: "Deadline", assignee_ids: "Mas'ul xodimlar",
 }
 
 const emptyForm = {
   client_name: "", company: "", activity_name: "", phone: "", amount: "", project_type: "", employees_count: "", budget: "",
   temperature: "", source: "", region: "", business_type: "", language: "", tier: "", funnel: "call_center", deadline: "",
-  assigned_to: "",
+  assignee_ids: [] as string[],
 }
 
 function leadToForm(lead: Lead) {
   const businessFieldRaw = lead.form_data?.business_field
   const suggestedBusinessType = !lead.business_type && typeof businessFieldRaw === "string" ? BUSINESS_FIELD_MAP[businessFieldRaw] : undefined
+  // Falls back to the legacy single `assigned_to` column for leads saved
+  // before assignee_ids existed (the migration backfills it, but this keeps
+  // the dialog correct even if a row somehow slipped through).
+  const assigneeIds = lead.assignee_ids?.length ? lead.assignee_ids : lead.assigned_to ? [lead.assigned_to] : []
   return {
     client_name: lead.client_name, company: lead.company ?? "", activity_name: lead.activity_name ?? "", phone: lead.phone ?? "",
     amount: lead.amount != null ? String(lead.amount) : "", project_type: lead.project_type ?? "",
@@ -33,7 +39,7 @@ function leadToForm(lead: Lead) {
     temperature: lead.temperature ?? "", source: lead.source ?? "", region: lead.region ?? "",
     business_type: lead.business_type ?? suggestedBusinessType ?? "", language: lead.language ?? "", tier: lead.tier ?? "",
     funnel: lead.funnel ?? "call_center", deadline: lead.deadline ? lead.deadline.slice(0, 10) : "",
-    assigned_to: lead.assigned_to ?? "",
+    assignee_ids: assigneeIds,
   }
 }
 
@@ -71,9 +77,11 @@ export function LeadFormDialog({ lead, open, onOpenChange, profiles, defaultFunn
       tier: form.tier || null,
       funnel: form.funnel,
       deadline: form.deadline || null,
-      assigned_to: form.assigned_to || null,
+      assigned_to: form.assignee_ids[0] ?? null,
+      assignee_ids: form.assignee_ids,
     }
-    const assignChanged = lead && form.assigned_to && form.assigned_to !== lead.assigned_to
+    const previousIds = lead ? (lead.assignee_ids?.length ? lead.assignee_ids : lead.assigned_to ? [lead.assigned_to] : []) : []
+    const newlyAssigned = form.assignee_ids.filter((id) => !previousIds.includes(id))
     const { error } = lead
       ? await supabase.from("leads").update(payload).eq("id", lead.id)
       : await supabase.from("leads").insert({ ...payload, stage: "potensial_mijoz" })
@@ -84,15 +92,17 @@ export function LeadFormDialog({ lead, open, onOpenChange, profiles, defaultFunn
     if (lead) {
       await logFieldChanges("lead", lead.id, leadToForm(lead), form, FIELD_LABELS)
     }
-    if (assignChanged) {
-      await supabase.from("notifications").insert({
-        type: "new_lead_assigned",
-        entity_type: "lead",
-        entity_id: lead!.id,
-        recipient_id: form.assigned_to,
-        title: "Sizga yangi lid biriktirildi",
-        body: form.client_name,
-      })
+    if (lead && newlyAssigned.length) {
+      for (const recipientId of newlyAssigned) {
+        await supabase.from("notifications").insert({
+          type: "new_lead_assigned",
+          entity_type: "lead",
+          entity_id: lead.id,
+          recipient_id: recipientId,
+          title: "Sizga yangi lid biriktirildi",
+          body: form.client_name,
+        })
+      }
     }
     onOpenChange(false)
     onSaved()
@@ -108,9 +118,18 @@ export function LeadFormDialog({ lead, open, onOpenChange, profiles, defaultFunn
           </div>
           <div>
             <Label>Telefon</Label>
-            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <PhoneInput value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
           </div>
         </div>
+        {typeof lead?.form_data?.telegram_username === "string" && lead.form_data.telegram_username && (
+          <div className="-mt-1.5 text-xs text-[var(--color-ink-soft)]">
+            Telegram: <a
+              href={`https://t.me/${lead.form_data.telegram_username.replace(/^@/, "")}`}
+              target="_blank" rel="noreferrer"
+              className="font-medium text-[var(--color-accent)] hover:underline"
+            >{lead.form_data.telegram_username}</a>
+          </div>
+        )}
         <div>
           <Label>Kompaniya</Label>
           <Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
@@ -178,16 +197,13 @@ export function LeadFormDialog({ lead, open, onOpenChange, profiles, defaultFunn
           </div>
         </div>
         <div>
-          <Label>Mas'ul xodim</Label>
-          <Select value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}>
-            <option value="">Tanlanmagan</option>
-            {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-          </Select>
+          <Label>Mas'ul xodimlar</Label>
+          <MultiAssigneeSelect value={form.assignee_ids} onChange={(ids) => setForm({ ...form, assignee_ids: ids })} profiles={profiles} />
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div>
             <Label>Summa</Label>
-            <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} />
           </div>
           <div>
             <Label>Xodimlar soni</Label>
@@ -208,7 +224,7 @@ export function LeadFormDialog({ lead, open, onOpenChange, profiles, defaultFunn
       {lead && (
         <div className="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4 text-sm">
           <div className="flex items-center justify-between text-xs text-[var(--color-ink-faint)]">
-            <span>Lid tushgan sana: {lead.submitted_at ? formatDate(lead.submitted_at) : "—"}</span>
+            <span>Lid tushgan sana: {lead.submitted_at ? formatDateTime(lead.submitted_at) : "—"}</span>
             <HistoryButton entityType="lead" entityId={lead.id} />
           </div>
           {lead.form_data && Object.keys(lead.form_data).length > 0 && (

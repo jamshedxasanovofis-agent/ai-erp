@@ -28,7 +28,9 @@ async function sendMessage(chatId: string | number, text: string) {
 }
 
 function fmtTime(iso: string) {
-  return new Date(iso).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+  // Edge Function runs in UTC — must pin to Tashkent explicitly, otherwise
+  // the bot reports times 5 hours behind local.
+  return new Date(iso).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tashkent" })
 }
 
 async function getFullRoleStaff() {
@@ -87,23 +89,58 @@ async function flipOverduePayments() {
   const today = new Date().toISOString().slice(0, 10)
   const { data: overdue } = await supabase
     .from("payment_stages")
-    .select("id, title, amount, contract_id, contracts(project_id, projects(billing_owner_id, name))")
+    .select("id, title, amount, contract_id, contracts(project_id, projects(billing_owner_id, billing_owner_ids, name))")
     .eq("status", "kutilmoqda")
     .lt("due_date", today)
   for (const s of (overdue ?? []) as any[]) {
     await supabase.from("payment_stages").update({ status: "kechikdi" }).eq("id", s.id)
-    const billingOwner = s.contracts?.projects?.billing_owner_id
-    if (billingOwner) {
+    const proj = s.contracts?.projects
+    const owners: string[] = proj?.billing_owner_ids?.length ? proj.billing_owner_ids : proj?.billing_owner_id ? [proj.billing_owner_id] : []
+    for (const recipientId of owners) {
       await supabase.from("notifications").insert({
-        type: "payment_due", entity_type: "payment_stage", entity_id: s.id, recipient_id: billingOwner,
-        title: "To'lov muddati o'tdi", body: `${s.contracts?.projects?.name ?? ""} — ${s.title}`,
+        type: "payment_due", entity_type: "payment_stage", entity_id: s.id, recipient_id: recipientId,
+        title: "To'lov muddati o'tdi", body: `${proj?.name ?? ""} — ${s.title}`,
       })
     }
+  }
+}
+
+const REMINDER_KIND_LABEL: Record<string, string> = {
+  call_back: "Qo'ng'iroq qilish",
+  clarify_answer: "Javobni aniqlashtirish",
+  zoom: "Zoom haqida eslatish",
+  payment: "To'lov haqida eslatish",
+  other: "Eslatma",
+}
+
+async function dispatchLeadReminders() {
+  const now = new Date().toISOString()
+  const { data: due } = await supabase
+    .from("lead_reminders")
+    .select("id, lead_id, assignee_id, remind_at, kind, note, leads(client_name, phone)")
+    .is("done_at", null)
+    .is("notified_at", null)
+    .lte("remind_at", now)
+  for (const r of (due ?? []) as any[]) {
+    const clientName = r.leads?.client_name ?? "Lid"
+    const kindLabel = REMINDER_KIND_LABEL[r.kind] ?? r.kind
+    const text = `🔔 Eslatma: ${kindLabel}\n👤 <b>${clientName}</b>${r.leads?.phone ? ` — ${r.leads.phone}` : ""}${r.note ? `\n📝 ${r.note}` : ""}`
+    if (GROUP_CHAT_ID) await sendMessage(GROUP_CHAT_ID, text)
+    if (r.assignee_id) {
+      const { data: profile } = await supabase.from("profiles").select("telegram_chat_id").eq("id", r.assignee_id).maybeSingle()
+      if (profile?.telegram_chat_id) await sendMessage(profile.telegram_chat_id, text)
+      await supabase.from("notifications").insert({
+        type: "lead_reminder", entity_type: "lead", entity_id: r.lead_id, recipient_id: r.assignee_id,
+        title: kindLabel, body: clientName, sent_to_telegram_at: new Date().toISOString(),
+      })
+    }
+    await supabase.from("lead_reminders").update({ notified_at: new Date().toISOString() }).eq("id", r.id)
   }
 }
 
 Deno.serve(async () => {
   await dispatchMeetingReminders()
   await flipOverduePayments()
+  await dispatchLeadReminders()
   return new Response("ok")
 })

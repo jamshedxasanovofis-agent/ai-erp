@@ -9,18 +9,55 @@ import { Card } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { Dialog } from "@/components/ui/Dialog"
-import { Label, Textarea, Select } from "@/components/ui/Input"
+import { Input, Label, Textarea, Select } from "@/components/ui/Input"
 import { Tabs } from "@/components/ui/Tabs"
 import { FilterBar, type FilterSpec } from "@/components/ui/FilterBar"
 import { searchClients, normalizePhoneDigits, type ClientMatch } from "@/lib/crmSearch"
-import { REGIONS, FUNNELS, LANGUAGES } from "@/lib/crmConstants"
+import { REGIONS, FUNNELS, LANGUAGES, BUSINESS_TYPES } from "@/lib/crmConstants"
 import { LeadFormDialog } from "@/components/crm/LeadFormDialog"
+import { LeadReminderDialog } from "@/components/crm/LeadReminderDialog"
 import type { Lead, ProfileOption } from "@/lib/crmTypes"
-import { formatDate } from "@/lib/utils"
-import { Plus, ChevronRight, Sheet, XCircle, RotateCcw, Code2, Clock, Link2, Check, CalendarCheck } from "lucide-react"
+import { formatDate, formatDateTime, formatUzPhone } from "@/lib/utils"
+import { useDragScroll, DRAG_SCROLL_CLASS } from "@/lib/useDragScroll"
+import {
+  Plus, ChevronRight, Sheet, XCircle, RotateCcw, Code2, Clock, Link2, Check, CalendarCheck,
+  Phone, Send, Briefcase, Hourglass, BellRing,
+} from "lucide-react"
+
+function formatElapsedLead(ms: number) {
+  const totalMinutes = Math.max(0, Math.floor(ms / 60000))
+  const days = Math.floor(totalMinutes / 1440)
+  const hours = Math.floor((totalMinutes % 1440) / 60)
+  const minutes = totalMinutes % 60
+  if (days > 0) return `${days} kun ${hours} soat ${minutes} daq`
+  if (hours > 0) return `${hours} soat ${minutes} daq`
+  return `${minutes} daq`
+}
+
+function LeadAgeBadge({ submittedAt, closedAt }: { submittedAt: string | null; closedAt: string | null }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (closedAt || !submittedAt) return
+    const id = setInterval(() => tick((n) => n + 1), 30000)
+    return () => clearInterval(id)
+  }, [submittedAt, closedAt])
+  if (!submittedAt) return null
+  const end = closedAt ? new Date(closedAt).getTime() : Date.now()
+  const elapsed = end - new Date(submittedAt).getTime()
+  if (elapsed < 0) return null
+  return (
+    <span
+      title={closedAt ? "Sotuv yopilgunga qadar ketgan vaqt" : "Lid tushganidan beri o'tgan vaqt"}
+      className={`flex items-center gap-0.5 rounded-md px-1 text-[11px] font-medium ${closedAt ? "text-[var(--color-ink-faint)]" : "text-[var(--color-accent)]"}`}
+    >
+      <Hourglass size={11} /> {formatElapsedLead(elapsed)}
+    </span>
+  )
+}
 
 const STAGES = [
   { key: "potensial_mijoz", label: "Potensial mijoz" },
+  { key: "boglanib_bolmadi", label: "Bog'lanib bo'lmadi" },
   { key: "lead", label: "Lead" },
   { key: "birinchi_uchrashuv", label: "Birinchi uchrashuv" },
   { key: "qayta_aloqa", label: "Qayta aloqa" },
@@ -28,6 +65,8 @@ const STAGES = [
   { key: "etirozlar", label: "E'tirozlar bilan ishlash" },
   { key: "ikkinchi_uchrashuv", label: "Ikkinchi uchrashuv" },
   { key: "demo_berish", label: "Demo versiya berish" },
+  { key: "remarketing", label: "1-2 oy ichida rejalashtirmoqda" },
+  { key: "gamxorlik", label: "Gamxo'rlik" },
   { key: "yutildi", label: "Buyurtma olindi" },
 ] as const
 
@@ -36,14 +75,23 @@ const PIPELINE_STAGES = [
   { key: "qiziqdi", label: "Faqat qiziqdi" },
   { key: "qaror_qabul_qiluvchi_emas", label: "Qaror qabul qiluvchi emas" },
   { key: "sifatsiz_lid", label: "Sifatsiz lid" },
+  { key: "dublt", label: "Dubl" },
+  { key: "chatbot", label: "Chat-bot" },
+  { key: "telefon_kotarmadi", label: "Telefonni ko'tarmadi" },
+  { key: "byudjeti_yoq", label: "Byudjeti yo'q" },
+  { key: "reja_1_2_oy", label: "1-2 oylik rejada" },
+  { key: "kurs", label: "Kurs" },
   { key: "arxiv", label: "Arxiv" },
   { key: "boshqa", label: "Boshqa" },
 ] as const
 
-function StageColumn({ stageKey, children }: { stageKey: string; children: React.ReactNode }) {
+function StageColumn({ stageKey, children, fixedWidth }: { stageKey: string; children: React.ReactNode; fixedWidth?: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: stageKey })
   return (
-    <div ref={setNodeRef} className={`min-w-0 rounded-[var(--radius-md)] transition-colors ${isOver ? "bg-[var(--color-accent-soft)]" : ""}`}>
+    <div
+      ref={setNodeRef}
+      className={`min-w-0 rounded-[var(--radius-md)] transition-colors ${fixedWidth ? "w-[248px] shrink-0" : ""} ${isOver ? "bg-[var(--color-accent-soft)]" : ""}`}
+    >
       {children}
     </div>
   )
@@ -53,13 +101,14 @@ function DraggableLead({ id, children }: { id: string; children: React.ReactNode
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id })
   const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 50 } : undefined
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={isDragging ? "opacity-50" : ""}>
+    <div ref={setNodeRef} style={style} {...listeners} {...attributes} data-dnd-card className={isDragging ? "opacity-50" : ""}>
       {children}
     </div>
   )
 }
 
 export default function Crm() {
+  const boardScroll = useDragScroll<HTMLDivElement>()
   const [view, setView] = useState<"voronka" | "pipeline">("voronka")
   const [funnel, setFunnel] = useState<"marketing" | "call_center">("call_center")
   const [leads, setLeads] = useState<Lead[]>([])
@@ -77,6 +126,12 @@ export default function Crm() {
   const [profiles, setProfiles] = useState<ProfileOption[]>([])
   const [copiedLeadId, setCopiedLeadId] = useState<string | null>(null)
   const [meetingCounts, setMeetingCounts] = useState<Record<string, number>>({})
+  const [reminderLeadIds, setReminderLeadIds] = useState<Set<string>>(new Set())
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [stageFilter, setStageFilter] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState("")
+  const [reminderLead, setReminderLead] = useState<Lead | null>(null)
   const navigate = useNavigate()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
@@ -88,12 +143,23 @@ export default function Crm() {
   }
 
   async function load() {
-    const [{ data }, { data: pr }, { data: mtg }] = await Promise.all([
+    const [{ data }, { data: pr }, { data: mtg }, { data: rem }] = await Promise.all([
       supabase.from("leads").select("*").order("submitted_at", { ascending: false, nullsFirst: false }),
       supabase.from("profiles").select("id, full_name"),
       supabase.from("meetings").select("lead_id").eq("status", "otkazildi"),
+      supabase.from("lead_reminders").select("lead_id").is("done_at", null).is("notified_at", null),
     ])
-    setLeads((data as Lead[]) ?? [])
+    const fetchedLeads = (data as Lead[]) ?? []
+    // Self-heal: leads already closed (won/lost) BEFORE the time-in-pipeline
+    // freeze existed have no closed_at, so their age badge would otherwise
+    // count up forever. Stamp them once, from now, so they stop growing.
+    const legacyClosed = fetchedLeads.filter((l) => (l.stage === "yutildi" || l.stage === "yoqotildi") && !l.closed_at)
+    if (legacyClosed.length) {
+      const now = new Date().toISOString()
+      legacyClosed.forEach((l) => { l.closed_at = now })
+      Promise.all(legacyClosed.map((l) => supabase.from("leads").update({ closed_at: now }).eq("id", l.id)))
+    }
+    setLeads(fetchedLeads)
     setProfiles((pr as ProfileOption[]) ?? [])
     const counts: Record<string, number> = {}
     for (const m of (mtg as { lead_id: string | null }[]) ?? []) {
@@ -101,6 +167,7 @@ export default function Crm() {
       counts[m.lead_id] = (counts[m.lead_id] ?? 0) + 1
     }
     setMeetingCounts(counts)
+    setReminderLeadIds(new Set((rem as { lead_id: string }[] ?? []).map((r) => r.lead_id)))
   }
   useEffect(() => {
     load()
@@ -115,11 +182,18 @@ export default function Crm() {
     setOpen(true)
   }
 
+  // "Buyurtma olindi" freezes the lead's time-in-pipeline counter; leaving it
+  // (moved backward, or the loss flow below) un-freezes it again.
+  function closedAtForStage(stageKey: string): string | null {
+    return stageKey === "yutildi" ? new Date().toISOString() : null
+  }
+
   async function moveStage(lead: Lead, dir: 1 | -1) {
     const idx = STAGES.findIndex((s) => s.key === lead.stage)
     const next = STAGES[Math.min(STAGES.length - 1, Math.max(0, idx + dir))]
-    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, stage: next.key } : l)))
-    await supabase.from("leads").update({ stage: next.key }).eq("id", lead.id)
+    const closed_at = closedAtForStage(next.key)
+    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, stage: next.key, closed_at } : l)))
+    await supabase.from("leads").update({ stage: next.key, closed_at }).eq("id", lead.id)
   }
 
   async function onLeadDragEnd(e: DragEndEvent) {
@@ -128,8 +202,9 @@ export default function Crm() {
     const newStage = String(over.id)
     const lead = leads.find((l) => l.id === active.id)
     if (!lead || lead.stage === newStage) return
-    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, stage: newStage } : l)))
-    await supabase.from("leads").update({ stage: newStage }).eq("id", lead.id)
+    const closed_at = closedAtForStage(newStage)
+    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, stage: newStage, closed_at } : l)))
+    await supabase.from("leads").update({ stage: newStage, closed_at }).eq("id", lead.id)
   }
 
   async function onPipelineDragEnd(e: DragEndEvent) {
@@ -154,13 +229,14 @@ export default function Crm() {
       stage: "yoqotildi",
       pipeline_stage: rejectReason,
       rejection_note: rejectNote || null,
+      closed_at: new Date().toISOString(),
     }).eq("id", rejectTarget.id)
     setRejectTarget(null)
     load()
   }
 
   async function restore(lead: Lead) {
-    await supabase.from("leads").update({ stage: "potensial_mijoz", pipeline_stage: null, rejection_note: null }).eq("id", lead.id)
+    await supabase.from("leads").update({ stage: "potensial_mijoz", pipeline_stage: null, rejection_note: null, closed_at: null }).eq("id", lead.id)
     load()
   }
 
@@ -213,12 +289,22 @@ export default function Crm() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     const qDigits = normalizePhoneDigits(search)
+    const from = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null
+    const to = dateTo ? new Date(dateTo + "T23:59:59").getTime() : null
     return leads.filter((l) => {
       if (regionFilter && l.region !== regionFilter) return false
+      if (stageFilter && l.stage !== stageFilter) return false
+      if (categoryFilter && l.business_type !== categoryFilter) return false
+      if (from || to) {
+        const t = l.submitted_at ? new Date(l.submitted_at).getTime() : null
+        if (t == null) return false
+        if (from && t < from) return false
+        if (to && t > to) return false
+      }
       if (!q) return true
       return leadMatchesQuery(l, q, qDigits)
     })
-  }, [leads, search, regionFilter])
+  }, [leads, search, regionFilter, stageFilter, categoryFilter, dateFrom, dateTo])
 
   const voronkaLeads = filtered.filter((l) => l.stage !== "yoqotildi" && l.funnel === funnel)
   const pipelineLeads = filtered.filter((l) => l.stage === "yoqotildi")
@@ -235,6 +321,8 @@ export default function Crm() {
 
   const filterSpecs: FilterSpec[] = [
     { key: "region", label: "Barcha viloyatlar", value: regionFilter, options: REGIONS.map((r) => ({ value: r, label: r })), onChange: setRegionFilter },
+    { key: "stage", label: "Barcha bosqichlar", value: stageFilter, options: STAGES.map((s) => ({ value: s.key, label: s.label })), onChange: setStageFilter },
+    { key: "category", label: "Barcha biznes turlari", value: categoryFilter, options: BUSINESS_TYPES.map((b) => ({ value: b.key, label: b.label })), onChange: setCategoryFilter },
   ]
 
   return (
@@ -258,11 +346,23 @@ export default function Crm() {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={view} onChange={setView} options={[{ value: "voronka", label: "Voronka" }, { value: "pipeline", label: "Birja lidov" }]} />
-        {view === "voronka" && <Tabs value={funnel} onChange={setFunnel} options={FUNNELS} />}
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs value={view} onChange={setView} options={[{ value: "voronka", label: "Voronka" }, { value: "pipeline", label: "Birja lidov" }]} />
+          {view === "voronka" && <Tabs value={funnel} onChange={setFunnel} options={FUNNELS} />}
+        </div>
+        <div className="text-xs font-medium text-[var(--color-ink-soft)]">
+          Jami: <span className="text-[var(--color-ink)]">{(view === "voronka" ? voronkaLeads : pipelineLeads).length}</span> ta lid
+        </div>
       </div>
 
-      <FilterBar search={search} onSearchChange={setSearch} searchPlaceholder="Ism yoki telefon..." filters={filterSpecs} />
+      <div className="flex flex-wrap items-end gap-2">
+        <FilterBar search={search} onSearchChange={setSearch} searchPlaceholder="Ism yoki telefon..." filters={filterSpecs} className="flex-1" />
+        <div className="flex items-center gap-1.5">
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-auto" title="Sana (dan)" />
+          <span className="text-xs text-[var(--color-ink-faint)]">—</span>
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-auto" title="Sana (gacha)" />
+        </div>
+      </div>
 
       {search.trim().length >= 2 && (globalLeadMatches.length > 0 || clientMatches.length > 0) && (
         <div className="space-y-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
@@ -275,7 +375,7 @@ export default function Crm() {
             >
               <div>
                 <span className="font-medium">{l.client_name}</span>
-                {l.phone && <span className="ml-2 text-xs text-[var(--color-ink-faint)]">{l.phone}</span>}
+                {l.phone && <span className="ml-2 text-xs text-[var(--color-ink-faint)]">{formatUzPhone(l.phone)}</span>}
               </div>
               <Badge tone="accent">
                 {l.stage === "yoqotildi" ? "Birja lidov" : STAGES.find((s) => s.key === l.stage)?.label ?? l.stage}
@@ -290,7 +390,7 @@ export default function Crm() {
             >
               <div>
                 <span className="font-medium">{c.name}</span>
-                {c.phone && <span className="ml-2 text-xs text-[var(--color-ink-faint)]">{c.phone}</span>}
+                {c.phone && <span className="ml-2 text-xs text-[var(--color-ink-faint)]">{formatUzPhone(c.phone)}</span>}
               </div>
               <Badge tone="success">Mijoz</Badge>
             </div>
@@ -300,11 +400,11 @@ export default function Crm() {
 
       {view === "voronka" && (
         <DndContext sensors={sensors} onDragEnd={onLeadDragEnd}>
-          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 xl:grid-cols-9">
+          <div ref={boardScroll.ref} {...boardScroll.dragScrollProps} className={`flex gap-3.5 overflow-x-auto pb-2 ${DRAG_SCROLL_CLASS}`}>
             {STAGES.map((stage) => {
               const items = voronkaLeads.filter((l) => l.stage === stage.key)
               return (
-                <StageColumn key={stage.key} stageKey={stage.key}>
+                <StageColumn key={stage.key} stageKey={stage.key} fixedWidth>
                   <div className="mb-2.5 flex items-center justify-between px-1">
                     <span className="text-[11.5px] font-semibold uppercase tracking-[0.05em] text-[var(--color-ink-soft)]">{stage.label}</span>
                     <span className="text-xs text-[var(--color-ink-faint)]">{items.length}</span>
@@ -349,10 +449,29 @@ export default function Crm() {
                                 {lead.region && <Badge tone="neutral">{lead.region}</Badge>}
                                 {lead.tier && <Badge tone="accent">Tier {lead.tier}</Badge>}
                               </div>
+                              {!!(lead.phone || lead.form_data?.telegram_username || lead.business_type || lead.form_data?.launch_timeline) && (
+                                <div className="mt-1.5 space-y-0.5 text-[11px] text-[var(--color-ink-soft)]">
+                                  {lead.phone && (
+                                    <div className="flex items-center gap-1"><Phone size={10} /> {formatUzPhone(lead.phone)}</div>
+                                  )}
+                                  {typeof lead.form_data?.telegram_username === "string" && lead.form_data.telegram_username && (
+                                    <div className="flex items-center gap-1"><Send size={10} /> {String(lead.form_data.telegram_username)}</div>
+                                  )}
+                                  {lead.business_type && (
+                                    <div className="flex items-center gap-1"><Briefcase size={10} /> {BUSINESS_TYPES.find((b) => b.key === lead.business_type)?.label ?? lead.business_type}</div>
+                                  )}
+                                  {typeof lead.form_data?.launch_timeline === "string" && lead.form_data.launch_timeline && (
+                                    <div className="flex items-center gap-1"><Hourglass size={10} /> {String(lead.form_data.launch_timeline).replace(/_/g, " ")}</div>
+                                  )}
+                                </div>
+                              )}
                               <div className="mt-2 flex items-center justify-between">
-                                <div className="flex items-center gap-1 text-[11px] text-[var(--color-ink-faint)]">
-                                  <Clock size={11} />
-                                  {lead.deadline ? formatDate(lead.deadline) : lead.submitted_at ? formatDate(lead.submitted_at) : "—"}
+                                <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-ink-faint)]">
+                                  <span className="flex items-center gap-1">
+                                    <Clock size={11} />
+                                    {lead.deadline ? formatDate(lead.deadline) : lead.submitted_at ? formatDateTime(lead.submitted_at) : "—"}
+                                  </span>
+                                  <LeadAgeBadge submittedAt={lead.submitted_at} closedAt={lead.closed_at} />
                                 </div>
                                 <div className="flex items-center gap-0.5">
                                   {meetingCounts[lead.id] > 0 && (
@@ -363,6 +482,18 @@ export default function Crm() {
                                       <CalendarCheck size={12} /> {meetingCounts[lead.id]}
                                     </span>
                                   )}
+                                  <button
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => { e.stopPropagation(); setReminderLead(lead) }}
+                                    title={reminderLeadIds.has(lead.id) ? "Eslatma qo'yilgan" : "Eslatma qo'yish"}
+                                    className={`cursor-pointer rounded-md p-1 hover:bg-[var(--color-accent-soft)] ${
+                                      reminderLeadIds.has(lead.id)
+                                        ? "text-[var(--color-success)] hover:text-[var(--color-success)]"
+                                        : "text-[var(--color-ink-faint)] hover:text-[var(--color-accent)]"
+                                    }`}
+                                  >
+                                    <BellRing size={13} fill={reminderLeadIds.has(lead.id) ? "currentColor" : "none"} />
+                                  </button>
                                   <button
                                     onPointerDown={(e) => e.stopPropagation()}
                                     onClick={(e) => { e.stopPropagation(); copyBookingLink(lead) }}
@@ -404,11 +535,11 @@ export default function Crm() {
 
       {view === "pipeline" && (
         <DndContext sensors={sensors} onDragEnd={onPipelineDragEnd}>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div ref={boardScroll.ref} {...boardScroll.dragScrollProps} className={`flex gap-3.5 overflow-x-auto pb-2 ${DRAG_SCROLL_CLASS}`}>
             {PIPELINE_STAGES.map((stage) => {
               const items = pipelineLeads.filter((l) => l.pipeline_stage === stage.key)
               return (
-                <StageColumn key={stage.key} stageKey={stage.key}>
+                <StageColumn key={stage.key} stageKey={stage.key} fixedWidth>
                   <div className="mb-2.5 flex items-center justify-between px-1">
                     <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">{stage.label}</span>
                     <span className="text-xs text-[var(--color-ink-faint)]">{items.length}</span>
@@ -448,6 +579,14 @@ export default function Crm() {
         onSaved={load}
       />
 
+      <LeadReminderDialog
+        open={!!reminderLead}
+        onOpenChange={(v) => { if (!v) { setReminderLead(null); load() } }}
+        leadId={reminderLead?.id ?? null}
+        leadName={reminderLead?.client_name ?? ""}
+        profiles={profiles}
+      />
+
       <Dialog open={!!rejectTarget} onOpenChange={() => setRejectTarget(null)} title="Nega yo'qotildik?">
         <form onSubmit={confirmReject} className="space-y-3">
           <div>
@@ -480,7 +619,7 @@ export default function Crm() {
             Google Apps Script, Zapier, Make yoki boshqa avtomatlashtirish orqali quyidagi so'rovni yuboring:
           </p>
           <pre className="overflow-x-auto rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] p-3 text-xs leading-relaxed">
-{`POST https://dmjgbwqnbthateuhpyde.supabase.co/rest/v1/leads
+{`POST ${import.meta.env.VITE_SUPABASE_URL}/rest/v1/leads
 apikey: <VITE_SUPABASE_ANON_KEY>
 Authorization: Bearer <VITE_SUPABASE_ANON_KEY>
 Content-Type: application/json

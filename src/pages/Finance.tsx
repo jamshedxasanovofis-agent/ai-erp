@@ -4,22 +4,26 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Dialog } from "@/components/ui/Dialog"
 import { Input, Label, Select } from "@/components/ui/Input"
+import { AmountInput } from "@/components/ui/MaskedInputs"
 import { FileUpload } from "@/components/ui/FileUpload"
 import { Progress } from "@/components/ui/Progress"
 import { Badge } from "@/components/ui/Badge"
 import { Tabs } from "@/components/ui/Tabs"
 import { HistoryButton } from "@/components/ui/HistoryPanel"
-import { logFieldChanges, logDeletion, fetchDeletionHistory, type FieldHistoryEntry } from "@/lib/history"
+import { logFieldChanges, deleteWithArchive, fetchDeletionHistory, type FieldHistoryEntry } from "@/lib/history"
+import { ArchivePanel } from "@/components/ui/ArchivePanel"
 import { markStagePaid, markStageUnpaid } from "@/lib/paymentSync"
-import { formatMoney, formatDate, formatDateTime } from "@/lib/utils"
+import { formatMoney, formatDate } from "@/lib/utils"
 import { Plus, TrendingUp, TrendingDown, Target, CalendarClock, Check, Pencil, Trash2, Calculator, TrendingDown as LostIcon, Paperclip, X, Wallet } from "lucide-react"
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, BarChart, Bar, YAxis } from "recharts"
 
 type Tx = {
   id: string; type: "kirim" | "chiqim"; category: string | null; amount: number; occurred_on: string
   receipt_url: string | null; edited_at: string | null; currency: string; expense_category: string | null
-  exchange_rate: number | null
+  exchange_rate: number | null; payment_method: string | null
 }
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = { karta: "Karta", naqd: "Naqd", perechislenie: "Perechislenie" }
 type Goal = { id: string; title: string; target_amount: number; period_start: string; period_end: string; target_leads: number | null }
 type PaymentStage = {
   id: string; contract_id: string; title: string; amount: number; due_date: string | null; status: string; paid_at: string | null
@@ -100,11 +104,11 @@ function FunnelCalculator({ onSaveGoal }: { onSaveGoal: (g: { target: number; le
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label>Oylik maqsad daromad ($)</Label>
-          <Input type="number" value={target} onChange={(e) => setTarget(Number(e.target.value))} />
+          <AmountInput value={String(target)} onChange={(v) => setTarget(Number(v))} />
         </div>
         <div>
           <Label>O'rtacha chek ($)</Label>
-          <Input type="number" value={avgDeal} onChange={(e) => setAvgDeal(Number(e.target.value))} />
+          <AmountInput value={String(avgDeal)} onChange={(v) => setAvgDeal(Number(v))} />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3">
@@ -114,11 +118,11 @@ function FunnelCalculator({ onSaveGoal }: { onSaveGoal: (g: { target: number; le
         </div>
         <div>
           <Label>Sotuv jamoasi ($/oy)</Label>
-          <Input type="number" value={salesCost} onChange={(e) => setSalesCost(Number(e.target.value))} />
+          <AmountInput value={String(salesCost)} onChange={(v) => setSalesCost(Number(v))} />
         </div>
         <div>
           <Label>Operatsion xarajat ($/oy)</Label>
-          <Input type="number" value={opsCost} onChange={(e) => setOpsCost(Number(e.target.value))} />
+          <AmountInput value={String(opsCost)} onChange={(v) => setOpsCost(Number(v))} />
         </div>
       </div>
 
@@ -227,6 +231,15 @@ export default function Finance() {
   const net = income - expense
   const lostTotal = lostLeads.reduce((s, l) => s + Number(l.amount || 0), 0)
 
+  const incomeByMethod = useMemo(() => {
+    const map: Record<string, number> = { karta: 0, naqd: 0, perechislenie: 0 }
+    for (const t of txs) {
+      if (t.type !== "kirim" || !t.payment_method) continue
+      map[t.payment_method] = (map[t.payment_method] ?? 0) + Number(t.amount)
+    }
+    return map
+  }, [txs])
+
   const lostByReason = useMemo(() => {
     const map: Record<string, number> = {}
     for (const l of lostLeads) {
@@ -291,8 +304,11 @@ export default function Finance() {
 
   async function removeTx(tx: Tx) {
     if (!confirm(`"${tx.category || (tx.type === "kirim" ? "Kirim" : "Chiqim")}" tranzaksiyasini o'chirishni tasdiqlaysizmi?`)) return
-    await logDeletion("finance_transaction", tx.id, tx)
-    await supabase.from("finance_transactions").delete().eq("id", tx.id)
+    const res = await deleteWithArchive("finance_transactions", "finance_transaction", tx.id, tx)
+    if (!res.ok) {
+      alert("O'chirib bo'lmadi: " + res.error)
+      return
+    }
     load()
   }
 
@@ -410,6 +426,14 @@ export default function Finance() {
         <Card><CardContent className="pt-5">
           <div className="mb-2 flex items-center gap-2 text-[var(--color-success)]"><TrendingUp size={16} /><span className="text-xs font-medium">Kirim</span></div>
           <div className="text-xl font-semibold">{money(income)}</div>
+          <div className="mt-2 space-y-0.5 border-t border-[var(--color-border)] pt-2 text-[11px] text-[var(--color-ink-faint)]">
+            {Object.entries(incomeByMethod).map(([k, v]) => (
+              <div key={k} className="flex items-center justify-between">
+                <span>{PAYMENT_METHOD_LABEL[k] ?? k}</span>
+                <span className="font-medium text-[var(--color-ink-soft)]">{money(v)}</span>
+              </div>
+            ))}
+          </div>
         </CardContent></Card>
         <Card><CardContent className="pt-5">
           <div className="mb-2 flex items-center gap-2 text-[var(--color-danger)]"><TrendingDown size={16} /><span className="text-xs font-medium">Chiqim</span></div>
@@ -423,11 +447,12 @@ export default function Finance() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle>Real vs Gipoteza</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Kutilayotgan tushumlar</CardTitle></CardHeader>
           <CardContent className="space-y-3 pt-0">
             <div>
-              <div className="text-xs text-[var(--color-ink-soft)]">Real (imzolangan shartnomalar)</div>
+              <div className="text-xs text-[var(--color-ink-soft)]">Shartnomalar bo'yicha (hali to'liq yopilmagan)</div>
               <div className="text-lg font-semibold text-[var(--color-success)]">{money(expectedContracts)}</div>
+              <div className="text-[11px] text-[var(--color-ink-faint)]">Loyihadagi to'lov summasi (yoki byudjet) — hali "yopilgan" belgilanmagan shartnomalar bo'yicha</div>
             </div>
             <div>
               <div className="text-xs text-[var(--color-ink-soft)]">Gipoteza (jarayondagi lidlar summasi)</div>
@@ -626,7 +651,7 @@ export default function Finance() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Summa (so'm)</Label>
-              <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required />
+              <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} required />
             </div>
             <div>
               <Label>Sana</Label>
@@ -649,7 +674,7 @@ export default function Finance() {
           </div>
           <div>
             <Label>Maqsad summasi</Label>
-            <Input type="number" value={goalForm.target_amount} onChange={(e) => setGoalForm({ ...goalForm, target_amount: e.target.value })} required />
+            <AmountInput value={goalForm.target_amount} onChange={(v) => setGoalForm({ ...goalForm, target_amount: v })} required />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -681,7 +706,7 @@ export default function Finance() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Summa</Label>
-              <Input type="number" value={stageForm.amount} onChange={(e) => setStageForm({ ...stageForm, amount: e.target.value })} required />
+              <AmountInput value={stageForm.amount} onChange={(v) => setStageForm({ ...stageForm, amount: v })} required />
             </div>
             <div>
               <Label>Muddat</Label>
@@ -696,26 +721,13 @@ export default function Finance() {
         <FunnelCalculator onSaveGoal={saveCalculatorGoal} />
       </Dialog>
 
-      <Dialog open={deletedOpen} onOpenChange={setDeletedOpen} title="O'chirilgan tranzaksiyalar tarixi">
-        <div className="space-y-2">
-          {deletedTxs.map((e) => {
-            let snap: Partial<Tx> = {}
-            try { snap = e.old_value ? JSON.parse(e.old_value) : {} } catch { /* ignore malformed snapshot */ }
-            return (
-              <div key={e.id} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{snap.category || (snap.type === "kirim" ? "Kirim" : "Chiqim")}</span>
-                  <span className={snap.type === "kirim" ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}>
-                    {snap.amount != null ? money(Number(snap.amount)) : "—"}
-                  </span>
-                </div>
-                <div className="mt-0.5 text-xs text-[var(--color-ink-faint)]">O'chirildi: {formatDateTime(e.created_at)}</div>
-              </div>
-            )
-          })}
-          {deletedTxs.length === 0 && <p className="text-xs text-[var(--color-ink-faint)]">Hozircha o'chirilgan tranzaksiyalar yo'q.</p>}
-        </div>
-      </Dialog>
+      <ArchivePanel
+        open={deletedOpen}
+        onOpenChange={setDeletedOpen}
+        items={deletedTxs}
+        onRestored={() => { openDeletedHistory(); load() }}
+        titleOf={(s) => String(s.category || (s.type === "kirim" ? "Kirim" : "Chiqim"))}
+      />
 
       <Dialog open={salaryOpen} onOpenChange={setSalaryOpen} title="Ish haqi" className="max-w-2xl">
         <div className="space-y-4">
@@ -736,7 +748,7 @@ export default function Finance() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Summa</Label>
-                <Input type="number" value={salaryForm.amount} onChange={(e) => setSalaryForm({ ...salaryForm, amount: e.target.value })} required />
+                <AmountInput value={salaryForm.amount} onChange={(v) => setSalaryForm({ ...salaryForm, amount: v })} required />
               </div>
               <div>
                 <Label>Qaysi kirimdan (ixtiyoriy)</Label>

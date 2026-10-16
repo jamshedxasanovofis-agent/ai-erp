@@ -5,10 +5,13 @@ import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { Dialog } from "@/components/ui/Dialog"
 import { Input, Label, Select } from "@/components/ui/Input"
+import { AmountInput } from "@/components/ui/MaskedInputs"
 import { FileUpload } from "@/components/ui/FileUpload"
 import { Comments } from "@/components/ui/Comments"
 import { formatMoney, formatDate } from "@/lib/utils"
-import { Plus, FileSignature, Paperclip, Trash2 } from "lucide-react"
+import { deleteWithArchive, fetchDeletionHistory, type FieldHistoryEntry } from "@/lib/history"
+import { ArchivePanel } from "@/components/ui/ArchivePanel"
+import { Plus, FileSignature, Paperclip, Trash2, Archive } from "lucide-react"
 
 const STATUS_TONE: Record<string, "neutral" | "accent" | "success" | "warning" | "danger"> = {
   yangi: "accent",
@@ -47,6 +50,8 @@ export default function Contracts() {
   const [contracts, setContracts] = useState<Contract[]>([])
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [open, setOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [deletedItems, setDeletedItems] = useState<FieldHistoryEntry[]>([])
   const [editing, setEditing] = useState<Contract | null>(null)
   const [form, setForm] = useState(emptyForm)
 
@@ -98,8 +103,17 @@ export default function Contracts() {
 
   async function remove(c: Contract) {
     if (!confirm(`"${c.number || "Raqamsiz"}" shartnomasini o‘chirishni tasdiqlaysizmi?`)) return
-    await supabase.from("contracts").delete().eq("id", c.id)
+    const res = await deleteWithArchive("contracts", "contract", c.id, c)
+    if (!res.ok) {
+      alert("O'chirib bo'lmadi: " + res.error)
+      return
+    }
     load()
+  }
+
+  async function openArchive() {
+    setDeletedItems(await fetchDeletionHistory("contract"))
+    setArchiveOpen(true)
   }
 
   return (
@@ -109,9 +123,14 @@ export default function Contracts() {
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight">Shartnomalar</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">Eski, yangi va kutilayotgan shartnomalar</p>
         </div>
-        <Button variant="accent" onClick={openNew}>
-          <Plus size={15} /> Yangi shartnoma
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={openArchive}>
+            <Archive size={15} /> Arxiv
+          </Button>
+          <Button variant="accent" onClick={openNew}>
+            <Plus size={15} /> Yangi shartnoma
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -167,7 +186,7 @@ export default function Contracts() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Summa</Label>
-              <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+              <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} />
             </div>
             <div>
               <Label>Holati</Label>
@@ -194,6 +213,14 @@ export default function Contracts() {
         </form>
         {editing && <Comments entityType="contract" entityId={editing.id} />}
       </Dialog>
+
+      <ArchivePanel
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        items={deletedItems}
+        onRestored={() => { openArchive(); load() }}
+        titleOf={(s) => String(s.number ?? "Shartnoma")}
+      />
     </div>
   )
 }

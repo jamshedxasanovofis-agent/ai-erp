@@ -8,7 +8,10 @@ import { Input, Label, Select, Textarea } from "@/components/ui/Input"
 import { FileUpload } from "@/components/ui/FileUpload"
 import { Comments } from "@/components/ui/Comments"
 import { formatDate } from "@/lib/utils"
-import { Plus, Link2, Paperclip, Trash2 } from "lucide-react"
+import { deleteWithArchive, fetchDeletionHistory, type FieldHistoryEntry } from "@/lib/history"
+import { ArchivePanel } from "@/components/ui/ArchivePanel"
+import { MultiAssigneeSelect } from "@/components/ui/MultiAssigneeSelect"
+import { Plus, Link2, Paperclip, Trash2, Archive } from "lucide-react"
 
 const STATUS_TONE: Record<string, "neutral" | "accent" | "success" | "warning" | "danger"> = {
   kutilmoqda: "warning",
@@ -35,19 +38,29 @@ type Demo = {
   deadline: string | null
   demo_link: string | null
   attachment_url: string | null
+  assignee_id: string | null
+  assignee_ids: string[] | null
 }
+type ProfileOption = { id: string; full_name: string }
 
-const emptyForm = { client_name: "", type: "demo", status: "kutilmoqda", requirements: "", scheduled_at: "", deadline: "", demo_link: "", attachment_url: "" }
+const emptyForm = { client_name: "", type: "demo", status: "kutilmoqda", requirements: "", scheduled_at: "", deadline: "", demo_link: "", attachment_url: "", assignee_ids: [] as string[] }
 
 export default function DemoTracker() {
   const [items, setItems] = useState<Demo[]>([])
+  const [profiles, setProfiles] = useState<ProfileOption[]>([])
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Demo | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [deletedItems, setDeletedItems] = useState<FieldHistoryEntry[]>([])
 
   async function load() {
-    const { data } = await supabase.from("demo_requests").select("*").order("created_at", { ascending: false })
+    const [{ data }, { data: pr }] = await Promise.all([
+      supabase.from("demo_requests").select("*").order("created_at", { ascending: false }),
+      supabase.from("profiles").select("id, full_name"),
+    ])
     setItems((data as Demo[]) ?? [])
+    setProfiles((pr as ProfileOption[]) ?? [])
   }
   useEffect(() => {
     load()
@@ -63,8 +76,13 @@ export default function DemoTracker() {
     setForm({
       client_name: d.client_name, type: d.type, status: d.status, requirements: d.requirements ?? "",
       scheduled_at: d.scheduled_at ?? "", deadline: d.deadline ?? "", demo_link: d.demo_link ?? "", attachment_url: d.attachment_url ?? "",
+      assignee_ids: d.assignee_ids?.length ? d.assignee_ids : d.assignee_id ? [d.assignee_id] : [],
     })
     setOpen(true)
+  }
+
+  async function notifyDemoDone(demoId: string) {
+    await supabase.functions.invoke("demo-notify", { body: { demo_id: demoId } })
   }
 
   async function save(e: React.FormEvent) {
@@ -78,20 +96,35 @@ export default function DemoTracker() {
       deadline: form.deadline || null,
       demo_link: form.demo_link || null,
       attachment_url: form.attachment_url || null,
+      assignee_id: form.assignee_ids[0] ?? null,
+      assignee_ids: form.assignee_ids,
     }
+    const justCompleted = form.status === "yakunlandi" && editing?.status !== "yakunlandi"
+    let recordId = editing?.id ?? null
     if (editing) {
       await supabase.from("demo_requests").update(payload).eq("id", editing.id)
     } else {
-      await supabase.from("demo_requests").insert(payload)
+      const { data: created } = await supabase.from("demo_requests").insert(payload).select("id").single()
+      recordId = created?.id ?? null
     }
+    if (justCompleted && recordId) await notifyDemoDone(recordId)
     setOpen(false)
     load()
   }
 
   async function remove(d: Demo) {
     if (!confirm(`"${d.client_name}" yozuvini o‘chirishni tasdiqlaysizmi?`)) return
-    await supabase.from("demo_requests").delete().eq("id", d.id)
+    const res = await deleteWithArchive("demo_requests", "demo_request", d.id, d)
+    if (!res.ok) {
+      alert("O'chirib bo'lmadi: " + res.error)
+      return
+    }
     load()
+  }
+
+  async function openArchive() {
+    setDeletedItems(await fetchDeletionHistory("demo_request"))
+    setArchiveOpen(true)
   }
 
   return (
@@ -101,9 +134,14 @@ export default function DemoTracker() {
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight">TZ / Demo</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">Kimga demo berildi, kimdan TZ olindi</p>
         </div>
-        <Button variant="accent" onClick={openNew}>
-          <Plus size={15} /> Yangi so‘rov
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={openArchive}>
+            <Archive size={15} /> Arxiv
+          </Button>
+          <Button variant="accent" onClick={openNew}>
+            <Plus size={15} /> Yangi so'rov
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -168,6 +206,15 @@ export default function DemoTracker() {
             </div>
           </div>
           <div>
+            <Label>Mas'ul sotuvchilar</Label>
+            <MultiAssigneeSelect
+              value={form.assignee_ids}
+              onChange={(ids) => setForm({ ...form, assignee_ids: ids })}
+              profiles={profiles}
+              placeholder="Tanlanmagan (barchaga xabar boradi)"
+            />
+          </div>
+          <div>
             <Label>Talablar / izoh</Label>
             <Textarea value={form.requirements} onChange={(e) => setForm({ ...form, requirements: e.target.value })} />
           </div>
@@ -193,6 +240,14 @@ export default function DemoTracker() {
         </form>
         {editing && <Comments entityType="demo_request" entityId={editing.id} />}
       </Dialog>
+
+      <ArchivePanel
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        items={deletedItems}
+        onRestored={() => { openArchive(); load() }}
+        titleOf={(s) => String(s.client_name ?? "Yozuv")}
+      />
     </div>
   )
 }

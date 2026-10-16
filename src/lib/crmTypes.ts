@@ -22,7 +22,9 @@ export type Lead = {
   funnel: string
   deadline: string | null
   assigned_to: string | null
+  assignee_ids: string[]
   booking_token: string | null
+  closed_at: string | null
 }
 
-export type ProfileOption = { id: string; full_name: string }
+export type ProfileOption = { id: string; full_name: string; avatar_url?: string | null }

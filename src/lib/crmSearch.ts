@@ -11,6 +11,7 @@ export type LeadOption = {
   client_name: string
   phone: string | null
   company: string | null
+  activity_name: string | null
   employees_count: number | null
   budget: string | null
   source: string | null
@@ -23,7 +24,7 @@ export type LeadOption = {
   deadline: string | null
 }
 
-export const LEAD_OPTION_SELECT = "id, client_name, phone, company, employees_count, budget, source, region, business_type, language, temperature, tier, project_type, deadline"
+export const LEAD_OPTION_SELECT = "id, client_name, phone, company, activity_name, employees_count, budget, source, region, business_type, language, temperature, tier, project_type, deadline"
 
 // Used by the Projects "attach lead" picker.
 export async function searchLeadByPhone(phone: string): Promise<LeadOption[]> {

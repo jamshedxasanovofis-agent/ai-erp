@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { Dialog } from "@/components/ui/Dialog"
 import { Input, Label, Select, Textarea } from "@/components/ui/Input"
+import { PhoneInput } from "@/components/ui/MaskedInputs"
 import { Avatar } from "@/components/ui/Avatar"
 import { Comments } from "@/components/ui/Comments"
-import { formatDate } from "@/lib/utils"
+import { formatDate, formatUzPhone } from "@/lib/utils"
 import { Plus, Star, MessageCircle } from "lucide-react"
 
 const LOYALTY_TONE: Record<string, "success" | "neutral" | "danger"> = {
@@ -207,7 +208,7 @@ export default function Clients() {
               {selected.tier && <Badge tone={TIER_TONE[selected.tier]}>Tier {selected.tier}</Badge>}
               {selected.is_referral && <Badge tone="accent">Sarafan orqali</Badge>}
             </div>
-            {selected.phone && <div><span className="font-medium">Telefon: </span>{selected.phone}</div>}
+            {selected.phone && <div><span className="font-medium">Telefon: </span>{formatUzPhone(selected.phone)}</div>}
             {selected.contact_person && <div><span className="font-medium">Kontakt shaxs: </span>{selected.contact_person}</div>}
             {selected.icp_portrait && (
               <div><span className="font-medium">ICP portret: </span>{selected.icp_portrait}</div>
@@ -246,7 +247,7 @@ export default function Clients() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Telefon</Label>
-              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              <PhoneInput value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
             </div>
             <div>
               <Label>Kontakt shaxs</Label>

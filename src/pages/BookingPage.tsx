@@ -72,6 +72,7 @@ export default function BookingPage() {
     if (!meeting || !selected) return
     setSaving(true)
     await supabase.from("meetings").update({ scheduled_at: selected.toISOString(), status: "tasdiqlangan" }).eq("booking_token", meeting.booking_token)
+    supabase.functions.invoke("meeting-notify", { body: { meeting_id: meeting.id, event: "confirmed" } })
     setConfirmed(true)
     setSaving(false)
   }

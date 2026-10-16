@@ -1,5 +1,5 @@
 -- Dynamic ERP — full schema
--- Run this once in Supabase SQL editor (Project dmjgbwqnbthateuhpyde)
+-- Run this once in Supabase SQL editor 
 
 create extension if not exists "pgcrypto";
 

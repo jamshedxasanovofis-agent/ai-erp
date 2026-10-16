@@ -14,6 +14,8 @@ export const SOURCES = [
   { key: "target_reklama", label: "Target reklama" },
   { key: "ig", label: "Instagram (target)" },
   { key: "fb", label: "Facebook (target)" },
+  { key: "kurs", label: "Kurs" },
+  { key: "chatbot", label: "Chat-bot" },
 ]
 
 export const REGIONS = [
@@ -43,6 +45,14 @@ export const LANGUAGES = [
 ]
 
 export const TIERS = ["A", "B", "C"] as const
+
+export const REMINDER_KINDS = [
+  { key: "call_back", label: "Qo'ng'iroq qilish" },
+  { key: "clarify_answer", label: "Javobni aniqlashtirish" },
+  { key: "zoom", label: "Zoom haqida eslatish" },
+  { key: "payment", label: "To'lov haqida eslatish" },
+  { key: "other", label: "Boshqa" },
+]
 
 export const FUNNELS = [
   { value: "marketing" as const, label: "Marketing" },

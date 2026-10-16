@@ -27,6 +27,11 @@ Deno.serve(async (req) => {
   const chatId = message.chat.id
   const text: string = message.text.trim()
 
+  if (text.startsWith("/id")) {
+    await sendMessage(chatId, `Chat ID: <code>${chatId}</code>`)
+    return new Response("ok")
+  }
+
   if (text.startsWith("/start")) {
     const parts = text.split(" ")
     const payload = parts[1]

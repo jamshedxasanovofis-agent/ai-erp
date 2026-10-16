@@ -14,10 +14,15 @@ export async function markStagePaid(params: {
   receiptUrl?: string | null
   note?: string | null
   exchangeRate?: number | null
+  paymentMethod?: string | null
 }) {
   const today = new Date().toISOString().slice(0, 10)
-  await supabase.from("payment_stages").update({ status: "tolandi", paid_at: today }).eq("id", params.stageId)
-  await supabase.from("finance_transactions").insert({
+  const { error: stageErr } = await supabase.from("payment_stages").update({ status: "tolandi", paid_at: today, payment_method: params.paymentMethod ?? null }).eq("id", params.stageId)
+  if (stageErr) {
+    alert("To'lov bosqichini yangilab bo'lmadi: " + stageErr.message)
+    throw stageErr
+  }
+  const { error: txErr } = await supabase.from("finance_transactions").insert({
     type: "kirim",
     category: params.title,
     amount: params.amount,
@@ -28,13 +33,22 @@ export async function markStagePaid(params: {
     receipt_url: params.receiptUrl ?? null,
     description: params.note ?? null,
     exchange_rate: params.exchangeRate ?? null,
+    payment_method: params.paymentMethod ?? null,
   })
+  if (txErr) {
+    alert("Moliyaga tranzaksiya qo'shib bo'lmadi: " + txErr.message)
+    throw txErr
+  }
 }
 
 // Reverses markStagePaid: resets the stage and removes the finance record it
 // created, logging the removal so it still shows up in "O'chirilganlar tarixi".
 export async function markStageUnpaid(stageId: string) {
-  await supabase.from("payment_stages").update({ status: "kutilmoqda", paid_at: null }).eq("id", stageId)
+  const { error: stageErr } = await supabase.from("payment_stages").update({ status: "kutilmoqda", paid_at: null }).eq("id", stageId)
+  if (stageErr) {
+    alert("To'lov bosqichini yangilab bo'lmadi: " + stageErr.message)
+    throw stageErr
+  }
   const { data: txs } = await supabase.from("finance_transactions").select("*").eq("payment_stage_id", stageId)
   for (const tx of txs ?? []) {
     await logDeletion("finance_transaction", tx.id, tx)

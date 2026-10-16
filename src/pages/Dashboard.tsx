@@ -15,22 +15,29 @@ import { TaskCard, type Task } from "@/components/tasks/TaskCard"
 import { LeadFormDialog } from "@/components/crm/LeadFormDialog"
 import type { Lead } from "@/lib/crmTypes"
 import { formatMoney, formatDate } from "@/lib/utils"
-import { Columns3, FolderKanban, Wallet, Contact, CalendarClock, FileWarning, Plus, Copy, Check, Trash2, User } from "lucide-react"
+import { deleteWithArchive, fetchDeletionHistory, type FieldHistoryEntry } from "@/lib/history"
+import { ArchivePanel } from "@/components/ui/ArchivePanel"
+import { MultiAssigneeSelect } from "@/components/ui/MultiAssigneeSelect"
+import { Columns3, FolderKanban, Wallet, Contact, CalendarClock, FileWarning, Plus, Copy, Check, Trash2, User, Archive, Video, MapPin } from "lucide-react"
 
 const fade = {
   initial: { opacity: 0, y: 10 },
   animate: { opacity: 1, y: 0 },
 }
 
-type OverdueTask = { id: string; title: string; deadline: string; assignee_id: string | null }
+type OverdueTask = { id: string; title: string; deadline: string; assignee_id: string | null; assignee_ids: string[] | null }
+function overdueTaskAssigneeIds(t: OverdueTask): string[] {
+  return t.assignee_ids?.length ? t.assignee_ids : t.assignee_id ? [t.assignee_id] : []
+}
 type Meeting = {
   id: string; scheduled_at: string; status: string; lead_id: string | null; client_photo_url: string | null
-  booking_token: string; guest_name: string | null; leads?: { client_name: string } | null
+  booking_token: string; guest_name: string | null; format: string | null; assignee_id: string | null; assignee_ids: string[] | null
+  leads?: { client_name: string } | null
 }
 type ProfileOption = { id: string; full_name: string; avatar_url: string | null }
 type LeadOption = { id: string; client_name: string; phone: string | null }
 
-const STATUS_LABEL: Record<string, string> = { yangi: "Yangi", jarayonda: "Jarayonda", bajarildi: "Bajarildi" }
+const STATUS_LABEL: Record<string, string> = { yangi: "Yangi", jarayonda: "Jarayonda" }
 
 const OY_NOMLARI = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr"]
 function formatMeetingDateTime(iso: string) {
@@ -58,17 +65,20 @@ export default function Dashboard() {
   const [taskScope, setTaskScope] = useState<"barcha" | "mening">("barcha")
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [meetingFilter, setMeetingFilter] = useState<"bugun" | "ertaga" | "indinga" | "barchasi">("bugun")
+  const [meetingFormatFilter, setMeetingFormatFilter] = useState<"" | "onlayn" | "oflayn">("")
   const [profiles, setProfiles] = useState<ProfileOption[]>([])
   const [meetingOpen, setMeetingOpen] = useState(false)
   const [leadQuery, setLeadQuery] = useState("")
   const [leadResults, setLeadResults] = useState<LeadOption[]>([])
-  const [meetingForm, setMeetingForm] = useState({ lead_id: "", guest_name: "", assignee_id: "", date: "", time: "10:00" })
+  const [meetingForm, setMeetingForm] = useState({ lead_id: "", guest_name: "", assignee_ids: [] as string[], date: "", time: "10:00", format: "oflayn" })
   const [bookingLink, setBookingLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null)
-  const [editForm, setEditForm] = useState({ date: "", time: "", status: "kutilmoqda" })
+  const [editForm, setEditForm] = useState({ date: "", time: "", status: "kutilmoqda", format: "oflayn", assignee_ids: [] as string[] })
   const [viewingLead, setViewingLead] = useState<Lead | null>(null)
   const [leadDialogOpen, setLeadDialogOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [deletedMeetings, setDeletedMeetings] = useState<FieldHistoryEntry[]>([])
 
   async function load() {
     const now = new Date()
@@ -81,7 +91,7 @@ export default function Dashboard() {
       supabase.from("clients").select("id", { count: "exact", head: true }),
       supabase.from("meetings").select("id", { count: "exact", head: true }).gte("scheduled_at", todayStart.toISOString()).lte("scheduled_at", todayEnd.toISOString()),
       supabase.from("projects").select("id", { count: "exact", head: true }).not("tz_file_url", "is", null),
-      supabase.from("tasks").select("id, title, deadline, assignee_id").lt("deadline", now.toISOString()).neq("status", "bajarildi"),
+      supabase.from("tasks").select("id, title, deadline, assignee_id, assignee_ids").lt("deadline", now.toISOString()).neq("status", "bajarildi"),
       supabase.from("tasks").select("*").order("created_at", { ascending: false }).limit(40),
       supabase.from("meetings").select("*, leads(client_name)").order("scheduled_at", { ascending: true }),
       supabase.from("profiles").select("id, full_name, avatar_url"),
@@ -103,23 +113,26 @@ export default function Dashboard() {
 
   async function notifyOverdue(tasks: OverdueTask[]) {
     for (const t of tasks) {
-      if (!t.assignee_id) continue
+      const ids = overdueTaskAssigneeIds(t)
+      if (!ids.length) continue
       const { data: existing } = await supabase
         .from("notifications")
-        .select("id")
+        .select("id, recipient_id")
         .eq("type", "overdue_task")
         .eq("entity_id", t.id)
         .is("read_at", null)
-        .maybeSingle()
-      if (existing) continue
-      await supabase.from("notifications").insert({
-        type: "overdue_task",
-        entity_type: "task",
-        entity_id: t.id,
-        recipient_id: t.assignee_id,
-        title: "Vazifa muddati o'tdi",
-        body: t.title,
-      })
+      const alreadyNotified = new Set((existing ?? []).map((n) => n.recipient_id))
+      for (const recipientId of ids) {
+        if (alreadyNotified.has(recipientId)) continue
+        await supabase.from("notifications").insert({
+          type: "overdue_task",
+          entity_type: "task",
+          entity_id: t.id,
+          recipient_id: recipientId,
+          title: "Vazifa muddati o'tdi",
+          body: t.title,
+        })
+      }
     }
   }
   useEffect(() => {
@@ -135,15 +148,33 @@ export default function Dashboard() {
     { label: "Ochiq TZ", value: stats.openTz, icon: FileWarning },
   ]
 
-  const visibleTasks = taskScope === "mening" ? feedTasks.filter((t) => t.assignee_id === session?.user.id) : feedTasks
+  const visibleTasks = taskScope === "mening"
+    ? feedTasks.filter((t) => !!session && (t.assignee_ids?.length ? t.assignee_ids : t.assignee_id ? [t.assignee_id] : []).includes(session.user.id))
+    : feedTasks
   const tasksByStatus = useMemo(() => {
-    const groups: Record<string, Task[]> = { yangi: [], jarayonda: [], bajarildi: [] }
+    const groups: Record<string, Task[]> = { yangi: [], jarayonda: [] }
     for (const t of visibleTasks) {
-      if (t.status === "tekshiruvda") continue
+      if (t.status === "tekshiruvda" || t.status === "bajarildi") continue
       (groups[t.status] ??= []).push(t)
     }
     return groups
   }, [visibleTasks])
+
+  // Nearest-upcoming-first: future meetings ascending (soonest at top), then
+  // past ones (most-recently-past first) below them — plain ascending sort
+  // by date alone would put stale June meetings above an upcoming Aug 3
+  // meeting, which reads as broken.
+  function sortByUpcomingFirst(list: Meeting[]) {
+    const now = Date.now()
+    return [...list].sort((a, b) => {
+      const ta = new Date(a.scheduled_at).getTime()
+      const tb = new Date(b.scheduled_at).getTime()
+      const aFuture = ta >= now
+      const bFuture = tb >= now
+      if (aFuture !== bFuture) return aFuture ? -1 : 1
+      return aFuture ? ta - tb : tb - ta
+    })
+  }
 
   const filteredMeetings = useMemo(() => {
     const now = new Date()
@@ -151,14 +182,18 @@ export default function Dashboard() {
     const today = dayKey(now)
     const tomorrow = dayKey(new Date(now.getTime() + 86400000))
     const dayAfter = dayKey(new Date(now.getTime() + 2 * 86400000))
-    if (meetingFilter === "barchasi") return meetings
-    return meetings.filter((m) => {
-      const k = dayKey(new Date(m.scheduled_at))
-      if (meetingFilter === "bugun") return k === today
-      if (meetingFilter === "ertaga") return k === tomorrow
-      return k === dayAfter
-    })
-  }, [meetings, meetingFilter])
+    let list = meetings
+    if (meetingFilter !== "barchasi") {
+      list = list.filter((m) => {
+        const k = dayKey(new Date(m.scheduled_at))
+        if (meetingFilter === "bugun") return k === today
+        if (meetingFilter === "ertaga") return k === tomorrow
+        return k === dayAfter
+      })
+    }
+    if (meetingFormatFilter) list = list.filter((m) => (m.format ?? "oflayn") === meetingFormatFilter)
+    return sortByUpcomingFirst(list)
+  }, [meetings, meetingFilter, meetingFormatFilter])
 
   async function searchLeads() {
     if (!leadQuery.trim()) return
@@ -173,12 +208,15 @@ export default function Dashboard() {
     const { data } = await supabase.from("meetings").insert({
       lead_id: meetingForm.lead_id || null,
       guest_name: meetingForm.lead_id ? null : meetingForm.guest_name || null,
-      assignee_id: meetingForm.assignee_id || null,
+      assignee_id: meetingForm.assignee_ids[0] ?? null,
+      assignee_ids: meetingForm.assignee_ids,
       scheduled_at,
       status: "tasdiqlangan",
-    }).select("booking_token").single()
+      format: meetingForm.format,
+    }).select("id, booking_token").single()
     if (data) {
       setBookingLink(`${window.location.origin}${window.location.pathname}#/booking/${data.booking_token}`)
+      supabase.functions.invoke("meeting-notify", { body: { meeting_id: data.id, event: "created" } })
     }
     load()
   }
@@ -187,7 +225,7 @@ export default function Dashboard() {
     setMeetingOpen(false)
     setBookingLink(null)
     setCopied(false)
-    setMeetingForm({ lead_id: "", guest_name: "", assignee_id: "", date: "", time: "10:00" })
+    setMeetingForm({ lead_id: "", guest_name: "", assignee_ids: [], date: "", time: "10:00", format: "oflayn" })
     setLeadQuery("")
     setLeadResults([])
   }
@@ -198,6 +236,8 @@ export default function Dashboard() {
       date: d.toISOString().slice(0, 10),
       time: d.toTimeString().slice(0, 5),
       status: m.status,
+      format: m.format ?? "oflayn",
+      assignee_ids: m.assignee_ids?.length ? m.assignee_ids : m.assignee_id ? [m.assignee_id] : [],
     })
     setEditingMeeting(m)
   }
@@ -206,7 +246,10 @@ export default function Dashboard() {
     e.preventDefault()
     if (!editingMeeting) return
     const scheduled_at = new Date(`${editForm.date}T${editForm.time}:00`).toISOString()
-    await supabase.from("meetings").update({ scheduled_at, status: editForm.status }).eq("id", editingMeeting.id)
+    await supabase.from("meetings").update({
+      scheduled_at, status: editForm.status, format: editForm.format,
+      assignee_id: editForm.assignee_ids[0] ?? null, assignee_ids: editForm.assignee_ids,
+    }).eq("id", editingMeeting.id)
     setEditingMeeting(null)
     load()
   }
@@ -214,9 +257,18 @@ export default function Dashboard() {
   async function deleteMeeting() {
     if (!editingMeeting) return
     if (!confirm("Uchrashuvni o'chirishni tasdiqlaysizmi?")) return
-    await supabase.from("meetings").delete().eq("id", editingMeeting.id)
+    const res = await deleteWithArchive("meetings", "meeting", editingMeeting.id, editingMeeting)
+    if (!res.ok) {
+      alert("O'chirib bo'lmadi: " + res.error)
+      return
+    }
     setEditingMeeting(null)
     load()
+  }
+
+  async function openArchive() {
+    setDeletedMeetings(await fetchDeletionHistory("meeting"))
+    setArchiveOpen(true)
   }
 
   async function openLeadFromMeeting() {
@@ -264,21 +316,33 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>Uchrashuvlar</CardTitle>
-            <Button size="sm" variant="outline" onClick={() => setMeetingOpen(true)}>
-              <Plus size={13} /> Yangi uchrashuv
-            </Button>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="outline" onClick={openArchive}>
+                <Archive size={13} /> Arxiv
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setMeetingOpen(true)}>
+                <Plus size={13} /> Yangi uchrashuv
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">
-            <Tabs
-              value={meetingFilter}
-              onChange={setMeetingFilter}
-              options={[
-                { value: "bugun", label: "Bugun" },
-                { value: "ertaga", label: "Ertaga" },
-                { value: "indinga", label: "Indinga" },
-                { value: "barchasi", label: "Barchasi" },
-              ]}
-            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Tabs
+                value={meetingFilter}
+                onChange={setMeetingFilter}
+                options={[
+                  { value: "bugun", label: "Bugun" },
+                  { value: "ertaga", label: "Ertaga" },
+                  { value: "indinga", label: "Indinga" },
+                  { value: "barchasi", label: "Barchasi" },
+                ]}
+              />
+              <Select value={meetingFormatFilter} onChange={(e) => setMeetingFormatFilter(e.target.value as typeof meetingFormatFilter)} className="w-auto min-w-[130px]">
+                <option value="">Barcha turlar</option>
+                <option value="onlayn">Onlayn</option>
+                <option value="oflayn">Oflayn</option>
+              </Select>
+            </div>
             <div className="space-y-2">
               {filteredMeetings.map((m) => (
                 <div
@@ -293,8 +357,12 @@ export default function Dashboard() {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{m.leads?.client_name ?? m.guest_name ?? "Lid biriktirilmagan"}</div>
-                    <div className="mt-0.5 text-sm font-medium text-[var(--color-ink-soft)]">
+                    <div className="mt-0.5 flex items-center gap-1.5 text-sm font-medium text-[var(--color-ink-soft)]">
                       {formatMeetingDateTime(m.scheduled_at)}
+                      <span className="flex items-center gap-0.5 text-xs font-normal text-[var(--color-ink-faint)]">
+                        {(m.format ?? "oflayn") === "onlayn" ? <Video size={11} /> : <MapPin size={11} />}
+                        {(m.format ?? "oflayn") === "onlayn" ? "Onlayn" : "Oflayn"}
+                      </span>
                     </div>
                   </div>
                   <Badge tone={m.status === "tasdiqlangan" ? "success" : m.status === "bekor_qilingan" ? "danger" : m.status === "otkazildi" ? "accent" : "neutral"}>
@@ -345,7 +413,7 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent className="pt-0">
           <DndContext sensors={sensors} onDragEnd={onTaskDragEnd}>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {Object.entries(tasksByStatus).map(([status, list]) => (
                 <TaskStatusColumn key={status} status={status}>
                   <div className="mb-2 flex items-center justify-between px-1">
@@ -357,7 +425,7 @@ export default function Dashboard() {
                       <TaskCard
                         key={t.id}
                         task={t}
-                        assignee={profiles.find((p) => p.id === t.assignee_id) ?? null}
+                        assignees={profiles.filter((p) => (t.assignee_ids?.length ? t.assignee_ids : t.assignee_id ? [t.assignee_id] : []).includes(p.id))}
                         onEdit={() => navigate("/vazifalar")}
                       />
                     ))}
@@ -421,14 +489,20 @@ export default function Dashboard() {
                 <Input type="time" value={meetingForm.time} onChange={(e) => setMeetingForm({ ...meetingForm, time: e.target.value })} required />
               </div>
             </div>
-            <div>
-              <Label>Mas'ul xodim</Label>
-              <Select value={meetingForm.assignee_id} onChange={(e) => setMeetingForm({ ...meetingForm, assignee_id: e.target.value })}>
-                <option value="">Tanlanmagan</option>
-                {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Mas'ul xodimlar</Label>
+                <MultiAssigneeSelect value={meetingForm.assignee_ids} onChange={(ids) => setMeetingForm({ ...meetingForm, assignee_ids: ids })} profiles={profiles} />
+              </div>
+              <div>
+                <Label>Turi</Label>
+                <Select value={meetingForm.format} onChange={(e) => setMeetingForm({ ...meetingForm, format: e.target.value })}>
+                  <option value="oflayn">Oflayn</option>
+                  <option value="onlayn">Onlayn</option>
+                </Select>
+              </div>
             </div>
-            <Button type="submit" variant="accent" className="w-full" disabled={!meetingForm.date}>Yaratish</Button>
+            <Button type="submit" variant="accent" className="w-full" disabled={!meetingForm.date}>Qo'shish</Button>
           </form>
         ) : (
           <div className="space-y-3">
@@ -474,14 +548,27 @@ export default function Dashboard() {
                 <Input type="time" value={editForm.time} onChange={(e) => setEditForm({ ...editForm, time: e.target.value })} required />
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Holati</Label>
+                <Select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
+                  <option value="kutilmoqda">Kutilmoqda</option>
+                  <option value="tasdiqlangan">Tasdiqlangan</option>
+                  <option value="bekor_qilingan">Bekor qilingan</option>
+                  <option value="otkazildi">O'tkazildi (bo'lib o'tdi)</option>
+                </Select>
+              </div>
+              <div>
+                <Label>Turi</Label>
+                <Select value={editForm.format} onChange={(e) => setEditForm({ ...editForm, format: e.target.value })}>
+                  <option value="oflayn">Oflayn</option>
+                  <option value="onlayn">Onlayn</option>
+                </Select>
+              </div>
+            </div>
             <div>
-              <Label>Holati</Label>
-              <Select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
-                <option value="kutilmoqda">Kutilmoqda</option>
-                <option value="tasdiqlangan">Tasdiqlangan</option>
-                <option value="bekor_qilingan">Bekor qilingan</option>
-                <option value="otkazildi">O'tkazildi (bo'lib o'tdi)</option>
-              </Select>
+              <Label>Mas'ul xodimlar</Label>
+              <MultiAssigneeSelect value={editForm.assignee_ids} onChange={(ids) => setEditForm({ ...editForm, assignee_ids: ids })} profiles={profiles} />
             </div>
             {editForm.status === "otkazildi" && <Comments entityType="meeting" entityId={editingMeeting.id} />}
             <div className="flex gap-2">
@@ -498,6 +585,14 @@ export default function Dashboard() {
         lead={viewingLead}
         profiles={profiles}
         onSaved={load}
+      />
+
+      <ArchivePanel
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        items={deletedMeetings}
+        onRestored={() => { openArchive(); load() }}
+        titleOf={(s) => String(s.guest_name ?? "Uchrashuv")}
       />
     </div>
   )

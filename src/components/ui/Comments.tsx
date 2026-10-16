@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { Textarea } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
-import { formatDate } from "@/lib/utils"
+import { formatDateTime } from "@/lib/utils"
 import { MessageSquare } from "lucide-react"
 
 type Comment = { id: string; body: string; author_name: string | null; created_at: string }
@@ -42,7 +42,7 @@ export function Comments({ entityType, entityId }: { entityType: string; entityI
           <div key={c.id} className="rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] px-3 py-2 text-xs">
             <div className="mb-0.5 flex items-center justify-between text-[10px] text-[var(--color-ink-faint)]">
               <span>{c.author_name}</span>
-              <span>{formatDate(c.created_at)}</span>
+              <span>{formatDateTime(c.created_at)}</span>
             </div>
             <div className="text-[var(--color-ink)]">{c.body}</div>
           </div>

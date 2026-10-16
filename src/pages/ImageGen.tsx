@@ -68,7 +68,11 @@ export default function ImageGen() {
 
   async function remove(item: GeneratedImage) {
     if (!confirm("Ushbu rasmni o‘chirishni tasdiqlaysizmi?")) return
-    await supabase.from("generated_images").delete().eq("id", item.id)
+    const { error } = await supabase.from("generated_images").delete().eq("id", item.id)
+    if (error) {
+      alert("O'chirib bo'lmadi: " + error.message)
+      return
+    }
     setPreview(null)
     load()
   }
